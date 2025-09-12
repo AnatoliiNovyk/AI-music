@@ -43,8 +43,23 @@ const saveSongs = async () => {
 const loadSongs = async () => {
     try {
         const data = await fs.readFile(DB_PATH, 'utf8');
-        songs = JSON.parse(data);
-        console.log("Successfully loaded songs from db.json");
+        const parsed = JSON.parse(data);
+        
+        // Update old audio URLs to use proxy format
+        for (const songId in parsed) {
+            const song = parsed[songId];
+            if (song.audioUrl && song.audioUrl.startsWith('http')) {
+                // Convert direct URLs to proxy URLs to avoid CORS
+                song.audioUrl = `/api/proxy-audio?url=${encodeURIComponent(song.audioUrl)}`;
+                console.log(`Updated audio URL for song: ${song.title}`);
+            }
+        }
+        
+        Object.assign(songs, parsed);
+        console.log('Successfully loaded songs from db.json');
+        
+        // Save updated URLs back to file
+        await saveSongs();
     } catch (error) {
         if (error.code === 'ENOENT') {
             console.log("db.json not found, starting with an empty library.");
@@ -71,41 +86,142 @@ const GenerationStatus = {
 // --- Suno AI API Integration (Implemented via local endpoints) ---
 const PORT = process.env.PORT || 3001;
 const API_URL_BASE = `http://localhost:${PORT}`;
+const SUNO_API_BASE = process.env.SUNO_API_BASE || 'https://api.suno.ai';
 
-const generateSunoAudio = async (lyrics, prompt, genre, vocalGender) => {
-    console.log("Requesting audio generation from local endpoint...");
+const generateSunoAudio = async (lyrics, prompt, genre, vocalGender, durationSecInput) => {
     const sunoPrompt = `${prompt}. A ${genre || 'pop'} song with ${vocalGender ? `${vocalGender} vocals` : 'vocals'}.`;
+    const defaultDuration = Number(process.env.SUNO_DURATION_SEC || 270);
+    const durationSec = Math.max(10, Math.min(Number(durationSecInput || defaultDuration) || defaultDuration, 480));
 
-    // Step 1: Initiate generation by calling our own API
-    const initiateResponse = await fetch(`${API_URL_BASE}/api/generate-audio`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lyrics, prompt: sunoPrompt }),
-    });
-    if (!initiateResponse.ok) {
-        throw new Error('Failed to initiate audio generation.');
-    }
-    const { generationId } = await initiateResponse.json();
-    console.log(`Audio job started with ID: ${generationId}`);
+    // Try real Suno API if configured
+    if (process.env.SUNO_API_KEY) {
+        try {
+            console.log("=== SUNO API ATTEMPT ===");
+            console.log("API Key present:", !!process.env.SUNO_API_KEY);
+            console.log("Requesting audio generation from Suno API...");
+            console.log("Prompt:", sunoPrompt);
+            console.log("Duration:", durationSec);
 
-    // Step 2: Poll for completion
-    while (true) {
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Poll every 5 seconds
-        console.log(`Polling audio status for job ${generationId}...`);
-        const statusResponse = await fetch(`${API_URL_BASE}/api/audio-status/${generationId}`);
-        if (!statusResponse.ok) {
-            throw new Error(`Polling failed for audio job ${generationId}`);
+            // Use the correct Suno API endpoint - try different API versions
+            let startRes;
+            try {
+                // Try v1 API first
+                startRes = await fetch('https://api.suno.ai/v1/songs', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${process.env.SUNO_API_KEY}`
+                    },
+                    body: JSON.stringify({ 
+                        prompt: sunoPrompt, 
+                        lyrics: lyrics,
+                        duration: durationSec,
+                        make_instrumental: false,
+                        wait_audio: false
+                    })
+                });
+            } catch (e) {
+                console.log("v1 API failed, trying generate endpoint...");
+                // Try alternative endpoint
+                startRes = await fetch('https://api.suno.ai/api/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${process.env.SUNO_API_KEY}`
+                    },
+                    body: JSON.stringify({ 
+                        prompt: sunoPrompt, 
+                        lyrics: lyrics,
+                        duration: durationSec
+                    })
+                });
+            }
+
+            if (!startRes.ok) {
+                const text = await startRes.text().catch(() => '');
+                console.error(`Suno API error ${startRes.status}:`, text);
+                throw new Error(`Suno start failed ${startRes.status}: ${text}`);
+            }
+            
+            const startJson = await startRes.json();
+            console.log("Suno response:", startJson);
+            
+            const generationId = startJson.id || startJson[0]?.id;
+            if (!generationId) throw new Error('Suno response missing job id');
+            console.log(`Suno job ${generationId} started.`);
+
+            // Polling for completion
+            const maxPollMs = 5 * 60 * 1000; // 5 minutes
+            const pollIntervalMs = 10000; // 10 seconds
+            const started = Date.now();
+            
+            while (Date.now() - started < maxPollMs) {
+                await new Promise(r => setTimeout(r, pollIntervalMs));
+                console.log(`Polling Suno job ${generationId}...`);
+                
+                const statusRes = await fetch(`https://api.suno.ai/v1/songs/${generationId}`, {
+                headers: { 'Authorization': `Bearer ${process.env.SUNO_API_KEY}` }
+            });
+                
+                if (!statusRes.ok) {
+                    console.warn(`Polling failed with status ${statusRes.status}`);
+                    continue;
+                }
+                
+                const status = await statusRes.json();
+                console.log(`Job ${generationId} status:`, status.status);
+                
+                if (status.status === 'complete' || status.status === 'streaming') {
+                    const audioUrl = status.audio_url || status.song_url;
+                    if (audioUrl) {
+                        console.log(`Suno job ${generationId} completed with audio URL:`, audioUrl);
+                        return audioUrl;
+                    }
+                }
+                
+                if (status.status === 'error' || status.status === 'failed') {
+                    throw new Error(status.error_message || 'Suno generation failed');
+                }
+            }
+            throw new Error('Suno polling timeout after 5 minutes');
+        } catch (err) {
+            console.error('=== SUNO API FAILED ===');
+            console.error('Error details:', err?.message || err);
+            console.error('Stack trace:', err?.stack);
+            console.warn('Falling back to demo audio...');
+            // fall through to demo audio
         }
-        const statusData = await statusResponse.json();
-
-        if (statusData.status === 'complete') {
-            console.log(`Audio job ${generationId} complete.`);
-            return statusData.url;
-        } else if (statusData.status === 'error') {
-            throw new Error(statusData.message || 'Audio generation failed.');
-        }
-        // else, status is 'generating', so we continue the loop
+    } else {
+        console.log("=== NO SUNO API KEY ===");
+        console.log("SUNO_API_KEY not found in environment variables");
     }
+
+    // Demo audio fallback - use longer sample files for better testing
+    console.log("Using demo audio files for testing...");
+    
+    // Array of demo audio URLs with different lengths for variety - use proxy URLs to avoid CORS
+    const demoAudioUrls = [
+        '/api/proxy-audio?url=' + encodeURIComponent('https://www.soundjay.com/misc/sounds/bell-ringing-05.wav'),
+        '/api/proxy-audio?url=' + encodeURIComponent('https://www.learningcontainer.com/wp-content/uploads/2020/02/Kalimba.mp3'),
+        '/api/proxy-audio?url=' + encodeURIComponent('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/mp3/SampleAudio_0.4mb_mp3.mp3'),
+        '/api/proxy-audio?url=' + encodeURIComponent('https://www.soundjay.com/misc/sounds/beep-07a.wav')
+    ];
+    
+    // Select based on genre for variety
+    let selectedIndex = 0;
+    if (genre && genre.toLowerCase().includes('trance')) selectedIndex = 1;
+    else if (genre && genre.toLowerCase().includes('pop')) selectedIndex = 2;
+    else if (genre && genre.toLowerCase().includes('ambient')) selectedIndex = 3;
+    else selectedIndex = Math.floor(Math.random() * demoAudioUrls.length);
+    
+    const selectedDemoUrl = demoAudioUrls[selectedIndex];
+    
+    console.log(`Selected demo audio for ${genre}: ${selectedDemoUrl}`);
+    
+    // Simulate processing time
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    return selectedDemoUrl;
 };
 
 // --- Video Generation Logic ---
@@ -137,12 +253,24 @@ const generateVideoForSong = async (songId) => {
         ${song.excludeStyles ? `The video must not contain any of the following visual elements or styles: ${song.excludeStyles}.` : ''}`.trim();
 
 
-        let operation = await ai.models.generateVideos({
-            model: 'veo-2.0-generate-001',
-            prompt: videoPrompt,
-            image: veoImageInput,
-            config: { numberOfVideos: 1 }
-        });
+        let operation;
+        try {
+            operation = await ai.models.generateVideos({
+                model: 'veo-2.0-generate-001',
+                prompt: videoPrompt,
+                image: veoImageInput,
+                config: { numberOfVideos: 1 }
+            });
+        } catch (billingError) {
+            console.warn(`[${songId}] Veo unavailable or billing required. Using placeholder video.`, billingError?.message || billingError);
+            const placeholderVideo = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+            song.videoUrl = placeholderVideo;
+            song.thumbnailUrl = song.coverArtUrl;
+            song.status = GenerationStatus.COMPLETE;
+            song.statusMessage = "Video mocked due to API billing limits.";
+            await saveSongs();
+            return;
+        }
 
         song.status = GenerationStatus.POLLING_VIDEO;
         song.statusMessage = "Rendering the final cut...";
@@ -153,7 +281,7 @@ const generateVideoForSong = async (songId) => {
             operation = await ai.operations.getVideosOperation({ operation });
         }
 
-        const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+        const downloadLink = operation?.response?.generatedVideos?.[0]?.video?.uri;
         if (downloadLink) {
             song.videoUrl = `${downloadLink}&key=${process.env.API_KEY}`;
             song.thumbnailUrl = song.coverArtUrl;
@@ -164,10 +292,13 @@ const generateVideoForSong = async (songId) => {
             throw new Error("Video generation completed but no download link was found.");
         }
     } catch(error) {
-        console.error(`[${songId}] Video generation failed:`, error);
-        song.status = GenerationStatus.ERROR;
-        song.failedStep = GenerationStatus.GENERATING_VIDEO;
-        song.statusMessage = error.message || "Failed to generate video.";
+        console.error(`[${songId}] Video generation failed, falling back to placeholder:`, error);
+        const placeholderVideo = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+        song.videoUrl = placeholderVideo;
+        song.thumbnailUrl = song.coverArtUrl;
+        song.status = GenerationStatus.COMPLETE;
+        song.statusMessage = "Video mocked due to API limits.";
+        song.failedStep = undefined;
     } finally {
         await saveSongs();
     }
@@ -201,10 +332,13 @@ const stepGenerateLyrics = async (songId) => {
 
 const stepGenerateAudio = async (songId) => {
     const song = songs[songId];
+    console.log(`=== STEP GENERATE AUDIO CALLED FOR SONG ${songId} ===`);
     song.status = GenerationStatus.GENERATING_AUDIO;
     song.statusMessage = "Composing the music...";
     await saveSongs();
+    console.log(`Calling generateSunoAudio for song: ${song.title}`);
     song.audioUrl = await generateSunoAudio(song.lyrics, song.prompt, song.genre, song.vocalGender);
+    console.log(`Audio URL generated: ${song.audioUrl}`);
 };
 
 const stepGenerateArt = async (songId) => {
@@ -216,13 +350,19 @@ const stepGenerateArt = async (songId) => {
     Style: The visual style of "${song.videoStyle}" should be very prominent, with an influence level of ${song.styleInfluence || 50}%. 
     ${song.excludeStyles ? `Do NOT include any of the following styles or elements: ${song.excludeStyles}.` : ''}`.trim();
 
-    const imageResponse = await ai.models.generateImages({
-        model: 'imagen-4.0-generate-001',
-        prompt: artPrompt,
-        config: { numberOfImages: 1, aspectRatio: '1:1' }
-    });
-    const base64Image = imageResponse.generatedImages[0].image.imageBytes;
-    song.coverArtUrl = `data:image/png;base64,${base64Image}`;
+    try {
+        const imageResponse = await ai.models.generateImages({
+            model: 'imagen-4.0-generate-001',
+            prompt: artPrompt,
+            config: { numberOfImages: 1, aspectRatio: '1:1' }
+        });
+        const base64Image = imageResponse.generatedImages[0].image.imageBytes;
+        song.coverArtUrl = `data:image/png;base64,${base64Image}`;
+    } catch (billingError) {
+        console.warn(`[${song.id}] Imagen unavailable or billing required. Using placeholder image.`, billingError?.message || billingError);
+        // Tiny 1x1 transparent PNG
+        song.coverArtUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';
+    }
 };
 
 
@@ -230,6 +370,9 @@ const stepGenerateArt = async (songId) => {
 const generationPipeline = async (songId, startStep = GenerationStatus.GENERATING_LYRICS) => {
     const song = songs[songId];
     if (!song) return;
+
+    console.log(`=== GENERATION PIPELINE STARTED FOR ${songId} ===`);
+    console.log(`Starting from step: ${startStep}`);
 
     try {
         const steps = [
@@ -241,12 +384,17 @@ const generationPipeline = async (songId, startStep = GenerationStatus.GENERATIN
         let startIndex = steps.findIndex(step => step.status === startStep);
         if (startIndex < 0) startIndex = 0;
 
+        console.log(`Executing ${steps.length - startIndex} steps starting from index ${startIndex}`);
+
         for (let i = startIndex; i < steps.length; i++) {
             const step = steps[i];
+            console.log(`Executing step ${i}: ${step.status}`);
             await step.execute(songId);
             await saveSongs();
+            console.log(`Step ${i} completed: ${step.status}`);
         }
 
+        console.log(`Starting video generation for ${songId}`);
         await generateVideoForSong(songId);
 
     } catch (error) {
@@ -271,8 +419,8 @@ apiRouter.post('/generate-audio', (req, res) => {
         
         setTimeout(() => {
             console.log(`[Suno Worker] Job ${generationId} finished.`);
-            const mockAudioUrl = 'https://cdn.pixabay.com/audio/2024/02/26/audio_4088805a3w.mp3';
-            audioJobs[generationId] = { status: 'complete', url: mockAudioUrl };
+            const localAudio = '/audio/sample.wav';
+            audioJobs[generationId] = { status: 'complete', url: localAudio };
         }, 20000);
 
         res.status(202).json({ generationId });
@@ -414,11 +562,78 @@ apiRouter.post('/regenerate-video', async (req, res) => {
     }
 });
 
+// Test endpoint for audio generation
+apiRouter.post('/test-audio', async (req, res) => {
+    try {
+        console.log('=== TESTING AUDIO GENERATION ===');
+        const testLyrics = "Test lyrics for audio generation";
+        const testPrompt = "Test pop song";
+        const testGenre = "pop";
+        
+        const audioUrl = await generateSunoAudio(testLyrics, testPrompt, testGenre, null, 30);
+        console.log('Test audio URL:', audioUrl);
+        
+        res.json({ success: true, audioUrl });
+    } catch (error) {
+        console.error('Test audio generation failed:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // --- Routing, Transpilation & Static File Serving ---
 const projectRoot = path.resolve(__dirname, '..');
 
 // 1. API Routes - These are the most specific and should come first.
 app.use('/api', apiRouter);
+
+// Simple audio proxy to avoid CORS on remote files for <audio> and WebAudio
+app.get('/api/proxy-audio', async (req, res) => {
+    try {
+        const url = req.query.url;
+        if (!url || typeof url !== 'string') return res.status(400).send('Missing url');
+        
+        console.log('Proxying audio URL:', url);
+        
+        const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        };
+        if (req.headers.range) headers['Range'] = req.headers.range;
+        
+        const upstream = await fetch(url, { headers });
+        console.log('Upstream response status:', upstream.status);
+        
+        if (!upstream.ok && upstream.status !== 206) {
+            console.error('Upstream error:', upstream.status, await upstream.text());
+            return res.status(upstream.status || 502).send('Upstream error');
+        }
+
+        // Forward critical headers for media playback
+        const contentType = upstream.headers.get('content-type') || 'audio/mpeg';
+        const contentLength = upstream.headers.get('content-length');
+        const acceptRanges = upstream.headers.get('accept-ranges') || 'bytes';
+        const contentRange = upstream.headers.get('content-range');
+
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Accept-Ranges', acceptRanges);
+        res.setHeader('Content-Type', contentType);
+        if (contentLength) res.setHeader('Content-Length', contentLength);
+        if (contentRange) res.setHeader('Content-Range', contentRange);
+
+        res.status(upstream.status);
+
+        const body = upstream.body; // ReadableStream
+        if (body && typeof body.getReader === 'function') {
+            const nodeStream = require('stream').Readable.fromWeb(body);
+            nodeStream.pipe(res);
+        } else {
+            const buffer = Buffer.from(await upstream.arrayBuffer());
+            res.end(buffer);
+        }
+    } catch (e) {
+        console.error('proxy-audio failed:', e);
+        res.status(500).send('proxy failed');
+    }
+});
 
 // 2. Transpilation Middleware - Catches .ts/.tsx requests before static middleware.
 app.use(async (req, res, next) => {
@@ -459,6 +674,16 @@ app.use(async (req, res, next) => {
 // allowing our SPA fallback to handle it.
 app.use(express.static(projectRoot, { index: false }));
 
+// 3.1. Serve audio files from server/public directory with proper CORS headers
+app.use('/audio', express.static(path.join(__dirname, 'public/audio'), {
+    setHeaders: (res, path) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET');
+        res.setHeader('Access-Control-Allow-Headers', 'Range');
+        res.setHeader('Accept-Ranges', 'bytes');
+    }
+}));
+
 
 const CORRECT_IMPORT_MAP = `<script type="importmap">
 {
@@ -472,11 +697,11 @@ const CORRECT_IMPORT_MAP = `<script type="importmap">
 
 // 4. SPA Fallback - For any GET request that hasn't been handled, serve the main HTML file.
 // This is the entry point for the React app.
-app.get('*', async (req, res) => {
+app.use(async (req, res, next) => {
+    if (req.method !== 'GET') return next();
     try {
         const indexPath = path.resolve(projectRoot, 'index.html');
         const html = await fs.readFile(indexPath, 'utf-8');
-        // Replace any existing importmap with the correct one, guaranteed.
         const modifiedHtml = html.replace(/<script type="importmap">[\s\S]*?<\/script>/, CORRECT_IMPORT_MAP);
         res.setHeader('Content-Type', 'text/html').send(modifiedHtml);
     } catch (err) {

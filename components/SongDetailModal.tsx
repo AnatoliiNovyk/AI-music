@@ -175,6 +175,61 @@ const SongDetailModal: React.FC<SongDetailModalProps> = ({ song, onClose, onUpda
     }, [isEditing, handleUndo, handleRedo]);
 
 
+    // Ensure audio element is CORS-enabled for WebAudio visualizer and add error handling
+    useEffect(() => {
+        if (audioRef.current && song.audioUrl) {
+            const audio = audioRef.current;
+            // Only set crossOrigin for proxy URLs, not direct HTTP URLs
+            if (song.audioUrl.startsWith('/api/')) {
+                audio.crossOrigin = 'anonymous';
+            } else {
+                audio.removeAttribute('crossorigin');
+            }
+            
+            // Add error handling
+            const handleError = (e: Event) => {
+                console.error('Audio loading error:', e);
+                console.error('Audio URL:', getAudioUrl(song.audioUrl));
+            };
+            
+            const handleCanPlay = () => {
+                console.log('Audio can play:', getAudioUrl(song.audioUrl));
+            };
+            
+            const handleLoadStart = () => {
+                console.log('Audio loading started:', getAudioUrl(song.audioUrl));
+            };
+            
+            audio.addEventListener('error', handleError);
+            audio.addEventListener('canplay', handleCanPlay);
+            audio.addEventListener('loadstart', handleLoadStart);
+            
+            return () => {
+                audio.removeEventListener('error', handleError);
+                audio.removeEventListener('canplay', handleCanPlay);
+                audio.removeEventListener('loadstart', handleLoadStart);
+            };
+        }
+    }, [song.audioUrl]);
+
+    // Helper function to get the correct audio URL
+    const getAudioUrl = (audioUrl: string) => {
+        if (!audioUrl) return '';
+        
+        // If it's a proxy URL or local API path, prepend the backend server URL
+        if (audioUrl.startsWith('/api/') || audioUrl.startsWith('/audio/')) {
+            return `http://localhost:3001${audioUrl}`;
+        }
+        
+        // If it's already a full URL (starts with http), return as is
+        if (audioUrl.startsWith('http')) {
+            return audioUrl;
+        }
+        
+        // Default case - assume it's a relative path
+        return `http://localhost:3001${audioUrl}`;
+    };
+
     // Effect for syncing video and audio playback
     useEffect(() => {
         const video = videoRef.current;
@@ -289,31 +344,52 @@ const SongDetailModal: React.FC<SongDetailModalProps> = ({ song, onClose, onUpda
         };
         
         const setupAudio = () => {
-             if (audioVisualizer.context) {
-                audioVisualizer.context.close();
+            // Always tear down any previous graph before creating a new one
+            if (audioVisualizer.animationId) cancelAnimationFrame(audioVisualizer.animationId);
+            if (audioVisualizer.source) {
+                try { audioVisualizer.source.disconnect(); } catch {}
+                audioVisualizer.source = null;
             }
-            const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-            const context = new AudioContext();
+            if (audioVisualizer.context) {
+                try { audioVisualizer.context.close(); } catch {}
+                audioVisualizer.context = null;
+            }
+
+            const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
+            const context = new AudioContextCtor();
             audioVisualizer.context = context;
             if (context.state === 'suspended') { context.resume(); }
 
             try {
-                if (!audioVisualizer.source) { audioVisualizer.source = context.createMediaElementSource(audio); }
+                // Create a fresh source bound to the NEW context
+                audioVisualizer.source = context.createMediaElementSource(audio);
                 const analyser = context.createAnalyser();
                 analyser.fftSize = 256;
                 audioVisualizer.analyser = analyser;
-                audioVisualizer.source.connect(analyser).connect(context.destination);
+                audioVisualizer.source.connect(analyser);
+                analyser.connect(context.destination);
                 draw();
-            } catch (e) { console.error("Error setting up audio visualizer:", e); }
+            } catch (e) {
+                console.error("Error setting up audio visualizer:", e);
+            }
         };
         
         const cleanup = () => {
             if (audioVisualizer.animationId) cancelAnimationFrame(audioVisualizer.animationId);
-            if (audioVisualizer.context) audioVisualizer.context.close().catch(console.error);
-            if (audioVisualizer.source) audioVisualizer.source.disconnect();
+            if (audioVisualizer.source) {
+                try { audioVisualizer.source.disconnect(); } catch {}
+                audioVisualizer.source = null;
+            }
+            if (audioVisualizer.context) {
+                audioVisualizer.context.close().catch(() => {});
+                audioVisualizer.context = null;
+            }
+            audioVisualizer.analyser = null;
         };
         
+        const handleCanPlay = () => setupAudio();
         video.addEventListener('play', setupAudio);
+        audio.addEventListener('canplay', handleCanPlay);
         video.addEventListener('pause', cleanup);
 
         return cleanup;
@@ -420,7 +496,7 @@ const SongDetailModal: React.FC<SongDetailModalProps> = ({ song, onClose, onUpda
                         {song.videoUrl ? (
                             <>
                                 <div className="relative w-full h-full">
-                                    <video ref={videoRef} src={song.videoUrl} controls className="w-full h-full object-contain" />
+                                    <video ref={videoRef} src={song.videoUrl} controls crossOrigin="anonymous" preload="metadata" className="w-full h-full object-contain" />
                                     <canvas ref={canvasRef} className="absolute bottom-0 left-0 w-full h-1/4 pointer-events-none opacity-70" />
                                 </div>
                                 <div className="absolute top-2 left-2 z-10">
@@ -452,7 +528,17 @@ const SongDetailModal: React.FC<SongDetailModalProps> = ({ song, onClose, onUpda
                                     <span>Uploading audio...</span>
                                 </div>
                             ) : song.audioUrl ? (
-                                <audio ref={audioRef} src={song.audioUrl} className="w-full h-12" controls />
+                                <audio 
+                                    ref={audioRef} 
+                                    src={getAudioUrl(song.audioUrl)} 
+                                    className="w-full h-12" 
+                                    controls 
+                                    crossOrigin="anonymous" 
+                                    preload="auto"
+                                    onError={(e) => console.error('Audio element error:', e)}
+                                    onLoadStart={() => console.log('Audio load started')}
+                                    onCanPlay={() => console.log('Audio can play')}
+                                />
                             ) : (
                                 <div className="w-full h-12 bg-gray-900/50 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-600 hover:border-purple-500 transition-colors">
                                     <label className="flex items-center gap-2 text-sm text-gray-300 hover:text-white cursor-pointer w-full h-full justify-center">

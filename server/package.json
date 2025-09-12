@@ -1,0 +1,21 @@
+{
+  "name": "symphony-ai-backend",
+  "version": "1.0.0",
+  "description": "Backend service for Symphony AI",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "@google/genai": "^2.1.0",
+    "uuid": "^9.0.1",
+    "dotenv": "^16.4.5",
+    "@babel/core": "^7.24.7",
+    "@babel/preset-env": "^7.24.7",
+    "@babel/preset-react": "^7.24.7",
+    "@babel/preset-typescript": "^7.24.7"
+  }
+}

@@ -214,20 +214,29 @@ const SongDetailModal: React.FC<SongDetailModalProps> = ({ song, onClose, onUpda
 
     // Helper function to get the correct audio URL
     const getAudioUrl = (audioUrl: string) => {
-        if (!audioUrl) return '';
+        console.log('getAudioUrl called with:', audioUrl);
+        if (!audioUrl) {
+            console.log('No audioUrl provided');
+            return '';
+        }
         
         // If it's a proxy URL or local API path, prepend the backend server URL
         if (audioUrl.startsWith('/api/') || audioUrl.startsWith('/audio/')) {
-            return `http://localhost:3001${audioUrl}`;
+            const result = `http://localhost:3001${audioUrl}`;
+            console.log('Proxy URL result:', result);
+            return result;
         }
         
         // If it's already a full URL (starts with http), return as is
         if (audioUrl.startsWith('http')) {
+            console.log('Direct URL result:', audioUrl);
             return audioUrl;
         }
         
         // Default case - assume it's a relative path
-        return `http://localhost:3001${audioUrl}`;
+        const result = `http://localhost:3001${audioUrl}`;
+        console.log('Default URL result:', result);
+        return result;
     };
 
     // Effect for syncing video and audio playback
@@ -533,11 +542,18 @@ const SongDetailModal: React.FC<SongDetailModalProps> = ({ song, onClose, onUpda
                                     src={getAudioUrl(song.audioUrl)} 
                                     className="w-full h-12" 
                                     controls 
-                                    crossOrigin="anonymous" 
                                     preload="auto"
-                                    onError={(e) => console.error('Audio element error:', e)}
-                                    onLoadStart={() => console.log('Audio load started')}
+                                    onError={(e) => {
+                                        console.error('Audio element error:', e);
+                                        console.error('Raw audioUrl:', song.audioUrl);
+                                        console.error('Processed audioUrl:', getAudioUrl(song.audioUrl));
+                                    }}
+                                    onLoadStart={() => {
+                                        console.log('Audio load started');
+                                        console.log('Audio src:', getAudioUrl(song.audioUrl));
+                                    }}
                                     onCanPlay={() => console.log('Audio can play')}
+                                    onLoadedMetadata={() => console.log('Audio metadata loaded')}
                                 />
                             ) : (
                                 <div className="w-full h-12 bg-gray-900/50 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-600 hover:border-purple-500 transition-colors">

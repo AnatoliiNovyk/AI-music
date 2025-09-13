@@ -65,35 +65,42 @@ const SongCard: React.FC<SongCardProps> = ({ song, onSelect, onRetry }) => {
     const canBeSelected = isComplete || isError;
     const hasMetadata = song.genre || song.tempo;
 
-
     return (
         <div 
-            className={`group relative bg-gray-800 rounded-lg overflow-hidden shadow-lg transition-transform duration-300 ${isComplete ? 'hover:scale-105 hover:shadow-purple-500/30' : ''} ${canBeSelected ? 'cursor-pointer' : 'cursor-wait'}`}
+            className={`song-card ${canBeSelected ? 'selectable' : ''}`}
             onClick={canBeSelected ? onSelect : undefined}
             aria-busy={!canBeSelected}
         >
             <StatusIndicator status={song.status} message={song.statusMessage} onRetry={() => onRetry(song)} />
 
             {isComplete ? (
-                <img src={song.coverArtUrl} alt={`Cover for ${song.title}`} className="w-full h-48 object-cover" />
+                <img 
+                    src={song.coverArtUrl} 
+                    alt={`Cover for ${song.title}`} 
+                    className="song-image" 
+                    onError={(e) => {
+                        // Fallback image if cover art fails to load
+                        (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=No+Image';
+                    }}
+                />
             ) : (
                 isError ? <ErrorPlaceholder /> : <GeneratingPlaceholder />
             )}
             
-            <div className="p-4">
-                <h3 className="font-bold text-lg truncate text-white">{song.title}</h3>
-                <p className="text-sm text-gray-400 truncate">{song.prompt}</p>
+            <div className="song-info">
+                <h3 className="song-title">{song.title || 'Untitled Song'}</h3>
+                <p className="song-description">{song.prompt || 'No description available'}</p>
                 {hasMetadata && (
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <div className="song-meta">
                         {song.genre && (
-                            <span className="flex items-center gap-1.5 bg-purple-500/20 text-purple-300 text-xs px-2 py-0.5 rounded-full">
-                                <i className="fas fa-guitar fa-fw text-purple-400"></i>
+                            <span className="meta-tag">
+                                <i className="fas fa-guitar"></i>
                                 <span>{song.genre}</span>
                             </span>
                         )}
                         {song.tempo && (
-                            <span className="flex items-center gap-1.5 bg-teal-500/20 text-teal-300 text-xs px-2 py-0.5 rounded-full">
-                                <i className="fas fa-stopwatch fa-fw text-teal-400"></i>
+                            <span className="meta-tag">
+                                <i className="fas fa-stopwatch"></i>
                                 <span>{song.tempo} BPM</span>
                             </span>
                         )}

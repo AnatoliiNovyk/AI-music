@@ -3,99 +3,81 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Symphony AI - Create and manage your AI-generated music" />
     <title>Symphony AI</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-
+    <link rel="icon" href="/favicon.ico" />
     <style>
-      @keyframes sound-wave {
-        0%, 40%, 100% {
-          transform: scaleY(0.4);
-          opacity: 0.5;
-        }
-        20% {
-          transform: scaleY(1.0);
-          opacity: 1;
-        }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
       }
-      .sound-bar {
-        display: inline-block;
-        width: 5px;
-        height: 40px;
-        background-color: #9ca3af;
-        animation: sound-wave 1.2s ease-in-out infinite;
-      }
-      /* Custom styles for the advanced options slider */
-      .custom-slider::-webkit-slider-runnable-track {
-        background: transparent;
-        height: 2px;
-      }
-      .custom-slider::-moz-range-track {
-        background: transparent;
-        height: 2px;
-      }
-      .custom-slider::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        margin-top: -11px;
-        background-color: #ec4899;
-        height: 24px;
-        width: 8px;
-        border-radius: 4px;
-      }
-      .custom-slider::-moz-range-thumb {
-        background-color: #ec4899;
-        height: 24px;
-        width: 8px;
-        border-radius: 4px;
-        border: none;
+      #root {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
       }
     </style>
   </head>
   <body class="bg-gray-900 text-white">
     <div id="root">
-      <div style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; color: #9ca3af; flex-direction: column; gap: 1rem;">
-        <i class="fas fa-spinner fa-spin fa-2x"></i>
-        <h1>Loading Symphony AI...</h1>
+      <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
+        <div style="text-align: center;">
+          <div style="font-size: 24px; margin-bottom: 16px;">Loading Symphony AI...</div>
+          <div style="display: flex; justify-content: center; gap: 4px; height: 40px; align-items: flex-end;">
+            <div style="width: 4px; height: 20px; background-color: #4f46e5; animation: sound-wave 1.2s ease-in-out infinite;"></div>
+            <div style="width: 4px; height: 30px; background-color: #7c3aed; animation: sound-wave 1.2s ease-in-out 0.2s infinite;"></div>
+            <div style="width: 4px; height: 40px; background-color: #8b5cf6; animation: sound-wave 1.2s ease-in-out 0.4s infinite;"></div>
+            <div style="width: 4px; height: 30px; background-color: #7c3aed; animation: sound-wave 1.2s ease-in-out 0.6s infinite;"></div>
+            <div style="width: 4px; height: 20px; background-color: #4f46e5; animation: sound-wave 1.2s ease-in-out 0.8s infinite;"></div>
+          </div>
+        </div>
       </div>
     </div>
     
-    <!-- Load React with global variables -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-    
-    <!-- Simple script to expose React to global scope if needed -->
     <script>
-      // Ensure React is available globally
-      if (typeof React === 'undefined' && typeof window !== 'undefined') {
-        window.React = window.React || window.react;
-      }
-      if (typeof ReactDOM === 'undefined' && typeof window !== 'undefined') {
-        window.ReactDOM = window.ReactDOM || window.reactDom;
-      }
-    </script>
-    
-    <!-- Load the app script directly -->
-    <script src="/assets/index-B_ct9azt.js" type="module"></script>
-    
-    <!-- Fallback error handling -->
-    <script>
-      // If the app hasn't started after 5 seconds, show an error
-      setTimeout(function() {
-        const root = document.getElementById('root');
-        if (root && root.querySelector('h1') && root.querySelector('h1').textContent === 'Loading Symphony AI...') {
-          root.innerHTML = `
-            <div style="color: #ff6b6b; padding: 20px; font-family: sans-serif; text-align: center;">
-              <h2>Application failed to start</h2>
-              <p>Please check the browser's console for error messages.</p>
-              <p>Make sure your browser supports all required JavaScript features.</p>
-              <button onclick="window.location.reload()" style="margin-top: 20px; padding: 10px 20px; background: #4f46e5; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                Try Again
+      // Add keyframes for the animation
+      const style = document.createElement('style');
+      style.textContent = `
+        @keyframes sound-wave {
+          0%, 100% { height: 20px; }
+          50% { height: 40px; }
+        }
+      `;
+      document.head.appendChild(style);
+
+      // Global error handler
+      window.addEventListener('error', function(event) {
+        console.error('Global error:', event.error);
+        const errorDiv = document.createElement('div');
+        errorDiv.style.position = 'fixed';
+        errorDiv.style.top = '0';
+        errorDiv.style.left = '0';
+        errorDiv.style.right = '0';
+        errorDiv.style.padding = '1rem';
+        errorDiv.style.backgroundColor = '#ef4444';
+        errorDiv.style.color = 'white';
+        errorDiv.style.zIndex = '1000';
+        errorDiv.textContent = 'An error occurred: ' + (event.error?.message || 'Unknown error');
+        document.body.prepend(errorDiv);
+      });
+
+      // Timeout for app loading
+      setTimeout(() => {
+        const loadingElement = document.querySelector('#root > div');
+        if (loadingElement) {
+          loadingElement.innerHTML = `
+            <div style="display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; padding: 2rem; text-align: center;">
+              <h2 style="font-size: 1.5rem; margin-bottom: 1rem;">The application is taking longer than expected to load.</h2>
+              <p style="margin-bottom: 1.5rem; color: #9ca3af;">Please check your internet connection and try again.</p>
+              <button onclick="window.location.reload()" style="padding: 0.5rem 1rem; background-color: #4f46e5; color: white; border: none; border-radius: 0.375rem; cursor: pointer;">
+                Retry
               </button>
             </div>
           `;
         }
-      }, 5000);
+      }, 10000);
     </script>
   </body>
 </html>

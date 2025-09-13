@@ -214,29 +214,18 @@ const SongDetailModal: React.FC<SongDetailModalProps> = ({ song, onClose, onUpda
 
     // Helper function to get the correct audio URL
     const getAudioUrl = (audioUrl: string) => {
-        console.log('getAudioUrl called with:', audioUrl);
         if (!audioUrl) {
-            console.log('No audioUrl provided');
             return '';
         }
         
-        // If it's a proxy URL or local API path, prepend the backend server URL
-        if (audioUrl.startsWith('/api/') || audioUrl.startsWith('/audio/')) {
-            const result = `http://localhost:3001${audioUrl}`;
-            console.log('Proxy URL result:', result);
-            return result;
-        }
-        
-        // If it's already a full URL (starts with http), return as is
+        // If it's already a full URL (starts with http), return as is.
         if (audioUrl.startsWith('http')) {
-            console.log('Direct URL result:', audioUrl);
             return audioUrl;
         }
-        
-        // Default case - assume it's a relative path
-        const result = `http://localhost:3001${audioUrl}`;
-        console.log('Default URL result:', result);
-        return result;
+        // Otherwise, assume it's a correct root-relative path for the current origin
+        // (e.g., /api/proxy-audio?url=... or /audio/sample.wav).
+        // The Vite dev server proxy will handle forwarding this to the backend.
+        return audioUrl;
     };
 
     // Effect for syncing video and audio playback
@@ -542,18 +531,31 @@ const SongDetailModal: React.FC<SongDetailModalProps> = ({ song, onClose, onUpda
                                     src={getAudioUrl(song.audioUrl)} 
                                     className="w-full h-12" 
                                     controls 
-                                    preload="auto"
+                                    preload="none"
                                     onError={(e) => {
                                         console.error('Audio element error:', e);
                                         console.error('Raw audioUrl:', song.audioUrl);
                                         console.error('Processed audioUrl:', getAudioUrl(song.audioUrl));
+                                        console.error('Audio element state:', {
+                                            readyState: audioRef.current?.readyState,
+                                            networkState: audioRef.current?.networkState,
+                                            error: audioRef.current?.error
+                                        });
                                     }}
                                     onLoadStart={() => {
                                         console.log('Audio load started');
                                         console.log('Audio src:', getAudioUrl(song.audioUrl));
                                     }}
                                     onCanPlay={() => console.log('Audio can play')}
-                                    onLoadedMetadata={() => console.log('Audio metadata loaded')}
+                                    onLoadedMetadata={() => {
+                                        console.log('Audio metadata loaded');
+                                        console.log('Audio duration:', audioRef.current?.duration);
+                                    }}
+                                    onStalled={() => console.log('Audio stalled')}
+                                    onSuspend={() => console.log('Audio loading suspended')}
+                                    onAbort={() => console.log('Audio loading aborted')}
+                                    onEmptied={() => console.log('Audio emptied')}
+                                    onWaiting={() => console.log('Audio waiting')}
                                 />
                             ) : (
                                 <div className="w-full h-12 bg-gray-900/50 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-600 hover:border-purple-500 transition-colors">

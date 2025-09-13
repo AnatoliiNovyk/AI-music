@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { v4 as uuidv4 } from 'uuid';
+import os from 'os';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -13,7 +14,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(cors());
+// Configure CORS for all routes
+const corsOptions = {
+    origin: '*',
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
+    exposedHeaders: ['Content-Length', 'Content-Range', 'X-Content-Range'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Range'],
+    credentials: true
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // --- Environment Variable Checks ---
@@ -25,7 +37,9 @@ if (!process.env.SUNO_API_KEY) {
     console.warn("WARNING: SUNO_API_KEY environment variable not set. Audio generation will be mocked.");
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Initialize the Google Generative AI client
+const ai = new GoogleGenerativeAI(process.env.API_KEY);
+const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
 // --- In-Memory Data Stores & Persistence ---
 const DB_PATH = path.resolve(__dirname, 'db.json');
@@ -187,41 +201,35 @@ const generateSunoAudio = async (lyrics, prompt, genre, vocalGender, durationSec
         } catch (err) {
             console.error('=== SUNO API FAILED ===');
             console.error('Error details:', err?.message || err);
-            console.error('Stack trace:', err?.stack);
-            console.warn('Falling back to demo audio...');
-            // fall through to demo audio
+            throw err; // Propagate the error to the pipeline
         }
     } else {
-        console.log("=== NO SUNO API KEY ===");
-        console.log("SUNO_API_KEY not found in environment variables");
+        console.log("=== NO SUNO API KEY: Using demo audio ===");
+        
+        // Array of demo audio URLs with different lengths for variety - use proxy URLs to avoid CORS
+        const demoAudioUrls = [
+            '/api/proxy-audio?url=' + encodeURIComponent('https://www.soundjay.com/misc/sounds/bell-ringing-05.wav'),
+            '/api/proxy-audio?url=' + encodeURIComponent('https://www.learningcontainer.com/wp-content/uploads/2020/02/Kalimba.mp3'),
+            '/api/proxy-audio?url=' + encodeURIComponent('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/mp3/SampleAudio_0.4mb_mp3.mp3'),
+            '/api/proxy-audio?url=' + encodeURIComponent('https://www.soundjay.com/misc/sounds/beep-07a.wav')
+        ];
+        
+        // Select based on genre for variety
+        let selectedIndex = 0;
+        if (genre && genre.toLowerCase().includes('trance')) selectedIndex = 1;
+        else if (genre && genre.toLowerCase().includes('pop')) selectedIndex = 2;
+        else if (genre && genre.toLowerCase().includes('ambient')) selectedIndex = 3;
+        else selectedIndex = Math.floor(Math.random() * demoAudioUrls.length);
+        
+        const selectedDemoUrl = demoAudioUrls[selectedIndex];
+        
+        console.log(`Selected demo audio for ${genre}: ${selectedDemoUrl}`);
+        
+        // Simulate processing time
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        return selectedDemoUrl;
     }
-
-    // Demo audio fallback - use longer sample files for better testing
-    console.log("Using demo audio files for testing...");
-    
-    // Array of demo audio URLs with different lengths for variety - use proxy URLs to avoid CORS
-    const demoAudioUrls = [
-        '/api/proxy-audio?url=' + encodeURIComponent('https://www.soundjay.com/misc/sounds/bell-ringing-05.wav'),
-        '/api/proxy-audio?url=' + encodeURIComponent('https://www.learningcontainer.com/wp-content/uploads/2020/02/Kalimba.mp3'),
-        '/api/proxy-audio?url=' + encodeURIComponent('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/mp3/SampleAudio_0.4mb_mp3.mp3'),
-        '/api/proxy-audio?url=' + encodeURIComponent('https://www.soundjay.com/misc/sounds/beep-07a.wav')
-    ];
-    
-    // Select based on genre for variety
-    let selectedIndex = 0;
-    if (genre && genre.toLowerCase().includes('trance')) selectedIndex = 1;
-    else if (genre && genre.toLowerCase().includes('pop')) selectedIndex = 2;
-    else if (genre && genre.toLowerCase().includes('ambient')) selectedIndex = 3;
-    else selectedIndex = Math.floor(Math.random() * demoAudioUrls.length);
-    
-    const selectedDemoUrl = demoAudioUrls[selectedIndex];
-    
-    console.log(`Selected demo audio for ${genre}: ${selectedDemoUrl}`);
-    
-    // Simulate processing time
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    return selectedDemoUrl;
 };
 
 // --- Video Generation Logic ---
@@ -253,56 +261,31 @@ const generateVideoForSong = async (songId) => {
         ${song.excludeStyles ? `The video must not contain any of the following visual elements or styles: ${song.excludeStyles}.` : ''}`.trim();
 
 
-        let operation;
         try {
-            operation = await ai.models.generateVideos({
-                model: 'veo-2.0-generate-001',
-                prompt: videoPrompt,
-                image: veoImageInput,
-                config: { numberOfVideos: 1 }
-            });
-        } catch (billingError) {
-            console.warn(`[${songId}] Veo unavailable or billing required. Using placeholder video.`, billingError?.message || billingError);
-            const placeholderVideo = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
-            song.videoUrl = placeholderVideo;
+            // Note: Video generation is not directly supported in the current version of the Google Generative AI SDK.
+            // This is a placeholder for future implementation.
+            console.warn('Video generation is currently not implemented in this version.');
+            
+            // For now, we'll just set a placeholder video URL
+            song.videoUrl = 'https://example.com/placeholder-video.mp4';
             song.thumbnailUrl = song.coverArtUrl;
-            song.status = GenerationStatus.COMPLETE;
-            song.statusMessage = "Video mocked due to API billing limits.";
+            song.status = GenerationStatus.COMPLETED;
+            song.statusMessage = "Your song is ready! (Video generation is currently disabled)";
             await saveSongs();
-            return;
+            console.log(`[${songId}] Video generation placeholder set.`);
+        } catch(error) {
+            console.error(`[${songId}] Video generation failed:`, error);
+            // Re-throw the error to be caught by the main generation pipeline
+            throw error;
         }
-
-        song.status = GenerationStatus.POLLING_VIDEO;
-        song.statusMessage = "Rendering the final cut...";
+    } catch (error) {
+        console.error(`[${songId}] Video generation pipeline failed:`, error);
+        song.status = GenerationStatus.FAILED;
+        song.statusMessage = "Failed to generate video: " + (error.message || 'Unknown error');
         await saveSongs();
-        while (!operation.done) {
-            console.log(`[${songId}] Polling video status...`);
-            await new Promise(resolve => setTimeout(resolve, 10000));
-            operation = await ai.operations.getVideosOperation({ operation });
-        }
-
-        const downloadLink = operation?.response?.generatedVideos?.[0]?.video?.uri;
-        if (downloadLink) {
-            song.videoUrl = `${downloadLink}&key=${process.env.API_KEY}`;
-            song.thumbnailUrl = song.coverArtUrl;
-            song.status = GenerationStatus.COMPLETE;
-            song.statusMessage = "Your masterpiece is ready!";
-            console.log(`[${songId}] Video generation complete.`);
-        } else {
-            throw new Error("Video generation completed but no download link was found.");
-        }
-    } catch(error) {
-        console.error(`[${songId}] Video generation failed, falling back to placeholder:`, error);
-        const placeholderVideo = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
-        song.videoUrl = placeholderVideo;
-        song.thumbnailUrl = song.coverArtUrl;
-        song.status = GenerationStatus.COMPLETE;
-        song.statusMessage = "Video mocked due to API limits.";
-        song.failedStep = undefined;
-    } finally {
-        await saveSongs();
+        throw error;
     }
-}
+};
 
 // --- Generation Step Functions ---
 
@@ -322,12 +305,23 @@ const stepGenerateLyrics = async (songId) => {
     Genre: ${song.genre || 'pop'}. 
     ${song.vocalGender ? `The vocals should be performed by a ${song.vocalGender} singer.` : ''}`.trim();
     
-    const response = await ai.models.generateContent({ 
-        model: 'gemini-2.5-flash', 
-        contents: lyricsPrompt,
-        config: { temperature }
+    const result = await model.generateContent({
+        contents: [{
+            role: "user",
+            parts: [{
+                text: lyricsPrompt
+            }]
+        }],
+        generationConfig: {
+            temperature: temperature,
+            topP: 0.95,
+            topK: 64,
+            maxOutputTokens: 4096,
+        },
     });
-    song.lyrics = response.text.trim();
+    
+    const response = result.response;
+    song.lyrics = response.text().trim();
 };
 
 const stepGenerateAudio = async (songId) => {
@@ -351,19 +345,37 @@ const stepGenerateArt = async (songId) => {
     ${song.excludeStyles ? `Do NOT include any of the following styles or elements: ${song.excludeStyles}.` : ''}`.trim();
 
     try {
-        const imageResponse = await ai.models.generateImages({
-            model: 'imagen-4.0-generate-001',
-            prompt: artPrompt,
-            config: { numberOfImages: 1, aspectRatio: '1:1' }
+        // For v0.24.1, we'll use the text-to-image model
+        const imageModel = ai.getGenerativeModel({ model: 'imagegeneration-001' });
+        const result = await imageModel.generateContent({
+            contents: [{
+                role: "user",
+                parts: [{
+                    text: artPrompt
+                }]
+            }],
+            generationConfig: {
+                temperature: 0.4,
+                topP: 0.95,
+                topK: 40,
+                maxOutputTokens: 2048,
+            },
         });
-        const base64Image = imageResponse.generatedImages[0].image.imageBytes;
-        song.coverArtUrl = `data:image/png;base64,${base64Image}`;
+        
+        // Get the first image from the response
+        const response = result.response;
+        const imagePart = response.candidates?.[0]?.content?.parts?.[0];
+        
+        if (imagePart && imagePart.inlineData) {
+            song.coverArtUrl = `data:image/png;base64,${imagePart.inlineData.data}`;
+        } else {
+            throw new Error('No image data in response');
+        }
     } catch (billingError) {
-        console.warn(`[${song.id}] Imagen unavailable or billing required. Using placeholder image.`, billingError?.message || billingError);
-        // Tiny 1x1 transparent PNG
-        song.coverArtUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';
+        console.warn(`[${song.id}] Imagen unavailable or billing required.`, billingError?.message || billingError);
+        throw billingError;
     }
-};
+}
 
 
 // --- Main Asynchronous Generation Pipeline ---
@@ -465,18 +477,30 @@ apiRouter.post('/generate', async (req, res) => {
         
         const temperature = 0.5 + ((advancedOptions?.weirdness || 50) / 100) * 0.5;
         const metadataPrompt = `Based on the song description "${prompt}", generate a short, catchy title (max 5 words), a music genre, a tempo in BPM (number only), a key signature, and 3 relevant tags (comma-separated). Return ONLY a JSON object with keys: "title", "genre", "tempo", "keySignature", "tags".`;
-        const metadataResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: metadataPrompt,
-            config: { responseMimeType: 'application/json', temperature }
-        });
         
         try {
-            let cleanedText = metadataResponse.text.trim().replace(/^```json\s*/, '').replace(/```$/, '');
+            const result = await model.generateContent({
+                contents: [{
+                    role: "user",
+                    parts: [{
+                        text: metadataPrompt
+                    }]
+                }],
+                generationConfig: {
+                    temperature: temperature,
+                    topP: 0.95,
+                    topK: 64,
+                    maxOutputTokens: 4096,
+                },
+            });
+            
+            const response = result.response;
+            const responseText = response.text().trim();
+            let cleanedText = responseText.replace(/^```json\s*/, '').replace(/```$/, '');
             const metadata = JSON.parse(cleanedText);
             Object.assign(initialSong, metadata);
         } catch (e) {
-            console.error("Failed to parse metadata from Gemini:", e, "Raw response:", metadataResponse.text);
+            console.error("Failed to parse metadata from Gemini:", e);
             // If metadata fails, we still proceed but with default values.
         }
 
@@ -583,140 +607,310 @@ apiRouter.post('/test-audio', async (req, res) => {
 // --- Routing, Transpilation & Static File Serving ---
 const projectRoot = path.resolve(__dirname, '..');
 
-// 1. API Routes - These are the most specific and should come first.
-app.use('/api', apiRouter);
 
 // Simple audio proxy to avoid CORS on remote files for <audio> and WebAudio
 app.get('/api/proxy-audio', async (req, res) => {
+    // Set CORS headers for all responses (including errors)
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range, Authorization');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
+    res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+
     try {
         const url = req.query.url;
-        if (!url || typeof url !== 'string') return res.status(400).send('Missing url');
-        
-        console.log('Proxying audio URL:', url);
-        
-        const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        };
-        if (req.headers.range) headers['Range'] = req.headers.range;
-        
-        const upstream = await fetch(url, { headers });
-        console.log('Upstream response status:', upstream.status);
-        
-        if (!upstream.ok && upstream.status !== 206) {
-            console.error('Upstream error:', upstream.status, await upstream.text());
-            return res.status(upstream.status || 502).send('Upstream error');
+        if (!url || typeof url !== 'string') {
+            console.error('Missing or invalid URL parameter');
+            return res.status(400).json({ error: 'Missing or invalid URL parameter' });
         }
 
-        // Forward critical headers for media playback
-        const contentType = upstream.headers.get('content-type') || 'audio/mpeg';
-        const contentLength = upstream.headers.get('content-length');
-        const acceptRanges = upstream.headers.get('accept-ranges') || 'bytes';
-        const contentRange = upstream.headers.get('content-range');
+        // Log the request for debugging
+        console.log('Proxying audio request to:', url);
+        console.log('Request headers:', req.headers);
 
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Accept-Ranges', acceptRanges);
+        const response = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,video/*;q=0.6,*/*;q=0.5',
+                'Accept-Encoding': 'identity;q=1, *;q=0',
+                'Range': req.headers.range || '',
+                'Referer': 'http://localhost:3000/',
+                'Origin': 'http://localhost:3000'
+            }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Failed to fetch audio: ${response.status} ${response.statusText}`, errorText);
+            return res.status(response.status).json({ 
+                error: 'Failed to fetch audio',
+                status: response.status,
+                statusText: response.statusText,
+                details: errorText
+            });
+        }
+
+        const contentType = response.headers.get('content-type') || 'audio/mpeg';
+        const contentLength = response.headers.get('content-length');
+        const acceptRanges = response.headers.get('accept-ranges') || 'bytes';
+        
+        // Set response headers
         res.setHeader('Content-Type', contentType);
-        if (contentLength) res.setHeader('Content-Length', contentLength);
-        if (contentRange) res.setHeader('Content-Range', contentRange);
-
-        res.status(upstream.status);
-
-        const body = upstream.body; // ReadableStream
-        if (body && typeof body.getReader === 'function') {
-            const nodeStream = require('stream').Readable.fromWeb(body);
-            nodeStream.pipe(res);
+        res.setHeader('Accept-Ranges', acceptRanges);
+        
+        if (contentLength) {
+            res.setHeader('Content-Length', contentLength);
+        }
+        
+        // Handle range requests for seeking
+        const range = req.headers.range;
+        if (range) {
+            const parts = range.replace(/bytes=/, '').split('-');
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : (contentLength ? parseInt(contentLength, 10) - 1 : 0);
+            const chunksize = (end - start) + 1;
+            
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${contentLength || '*'}`);
+            res.setHeader('Content-Length', chunksize);
+            res.status(206); // Partial Content
+            
+            if (response.body) {
+                // Stream the response for better performance
+                const reader = response.body.getReader();
+                let received = 0;
+                
+                // Skip to the start position if needed
+                if (start > 0) {
+                    let skipped = 0;
+                    while (skipped < start) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        skipped += value.length;
+                    }
+                }
+                
+                // Stream the requested range
+                while (received < chunksize) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = value.slice(0, chunksize - received);
+                    res.write(chunk);
+                    received += chunk.length;
+                    
+                    if (received >= chunksize) break;
+                }
+                res.end();
+                return;
+            }
+        }
+        
+        // If not a range request or streaming failed, send the whole response
+        if (response.body) {
+            // Stream the response for better performance
+            const reader = response.body.getReader();
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                res.write(value);
+            }
+            res.end();
         } else {
-            const buffer = Buffer.from(await upstream.arrayBuffer());
-            res.end(buffer);
+            // Fallback for older Node.js versions
+            const buffer = await response.arrayBuffer();
+            res.end(Buffer.from(buffer));
         }
     } catch (e) {
         console.error('proxy-audio failed:', e);
-        res.status(500).send('proxy failed');
+        res.status(500).json({ 
+            error: 'Proxy failed',
+            message: e.message,
+            stack: process.env.NODE_ENV === 'development' ? e.stack : undefined
+        });
     }
 });
 
-// 2. Transpilation Middleware - Catches .ts/.tsx requests before static middleware.
-app.use(async (req, res, next) => {
-    if (req.path.endsWith('.tsx') || req.path.endsWith('.ts')) {
-        const filePath = path.join(projectRoot, req.path.slice(1));
-        
-        try {
-            if (!existsSync(filePath)) {
-                return next(); // Let the 404 handler catch it
-            }
-            
-            const source = await fs.readFile(filePath, 'utf8');
-            
-            const result = await babel.transformAsync(source, {
-                filename: filePath,
-                presets: [
-                    "@babel/preset-typescript",
-                    ["@babel/preset-react", { "runtime": "automatic" }],
-                    "@babel/preset-env"
-                ],
-            });
+// Serve static files from the public directory (Vite build output)
+const publicPath = path.join(__dirname, 'public');
+const assetsPath = path.join(publicPath, 'assets');
 
-            if (result?.code) {
-                res.setHeader('Content-Type', 'application/javascript');
-                return res.send(result.code);
-            }
-        } catch (error) {
-            console.error(`Babel compilation error for ${filePath}:`, error);
-            res.status(500).json({ message: `Error during server-side transpilation for ${req.path}` });
-            return;
-        }
-    }
-    next();
-});
-
-// 3. Static Assets - Serve other files like CSS, images, etc.
-// `index: false` prevents express.static from serving index.html on its own,
-// allowing our SPA fallback to handle it.
-app.use(express.static(projectRoot, { index: false }));
-
-// 3.1. Serve audio files from server/public directory with proper CORS headers
-app.use('/audio', express.static(path.join(__dirname, 'public/audio'), {
-    setHeaders: (res, path) => {
+// Serve static assets with proper caching and CORS headers
+app.use('/assets', express.static(assetsPath, {
+    immutable: true,
+    maxAge: '1y',
+    setHeaders: (res, filePath) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET');
-        res.setHeader('Access-Control-Allow-Headers', 'Range');
-        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        
+        // Set proper MIME types
+        if (filePath.endsWith('.js')) {
+            res.setHeader('Content-Type', 'application/javascript');
+        } else if (filePath.endsWith('.css')) {
+            res.setHeader('Content-Type', 'text/css');
+        } else if (filePath.endsWith('.json')) {
+            res.setHeader('Content-Type', 'application/json');
+        }
     }
 }));
 
+// Serve audio files with proper CORS headers
+app.use('/audio', express.static(path.join(publicPath, 'audio'), {
+    setHeaders: (res) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Cache-Control', 'public, max-age=604800'); // 1 week
+    }
+}));
 
-const CORRECT_IMPORT_MAP = `<script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@18.3.1",
-    "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
-    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client"
-  }
+// Serve other static files with proper caching
+app.use(express.static(publicPath, {
+    index: false,
+    setHeaders: (res) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Cache-Control', 'public, max-age=3600'); // 1 hour
+    }
+}));
+
+// Serve index.html for the root path
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'), (err) => {
+        if (err) {
+            console.error('Error sending index.html:', err);
+            res.status(500).send('Error loading the application');
+        }
+    });
+});
+
+// SPA Fallback - For any GET request that hasn't been handled, serve the main HTML file
+app.get('*', (req, res, next) => {
+    // Skip API routes and static files
+    if (req.path.startsWith('/api/') || 
+        req.path.startsWith('/assets/') || 
+        req.path.startsWith('/audio/') ||
+        req.path.includes('.')) { // Skip files with extensions
+        return next();
+    }
+    
+    // Serve index.html for all other GET requests
+    res.sendFile(path.join(__dirname, 'public', 'index.html'), (err) => {
+        if (err) {
+            console.error('Error sending index.html:', err);
+            if (!res.headersSent) {
+                res.status(500).send('Error loading the application');
+            }
+        }
+    });
+});
+
+// Babel transformation for JSX/TSX files (development only)
+if (process.env.NODE_ENV !== 'production') {
+    app.use('*', async (req, res, next) => {
+        if (req.path.endsWith('.jsx') || req.path.endsWith('.tsx')) {
+            try {
+                const filePath = path.join(projectRoot, req.path.slice(1));
+                const code = await fs.readFile(filePath, 'utf-8');
+                const result = await babel.transformAsync(code, {
+                    filename: filePath,
+                    presets: [
+                        ['@babel/preset-env', { targets: 'defaults' }],
+                        ['@babel/preset-react', { runtime: 'automatic' }],
+                        '@babel/preset-typescript'
+                    ]
+                });
+                res.type('js').send(result.code);
+            } catch (error) {
+                console.error('Babel transform error:', error);
+                next(error);
+            }
+        } else {
+            next();
+        }
+    });
 }
-</script>`;
 
-// 4. SPA Fallback - For any GET request that hasn't been handled, serve the main HTML file.
-// This is the entry point for the React app.
-app.use(async (req, res, next) => {
-    if (req.method !== 'GET') return next();
-    try {
-        const indexPath = path.resolve(projectRoot, 'index.html');
-        const html = await fs.readFile(indexPath, 'utf-8');
-        const modifiedHtml = html.replace(/<script type="importmap">[\s\S]*?<\/script>/, CORRECT_IMPORT_MAP);
-        res.setHeader('Content-Type', 'text/html').send(modifiedHtml);
-    } catch (err) {
-        console.error("SPA Fallback error:", err);
-        res.status(500).send("Internal Server Error: Could not serve application.");
+// Serve static files from the project root with proper CORS headers
+app.use(express.static(projectRoot, {
+    index: false,
+    setHeaders: (res, filePath) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET');
+        
+        // Set appropriate content types based on file extension
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext === '.js') {
+            res.setHeader('Content-Type', 'application/javascript');
+        } else if (ext === '.css') {
+            res.setHeader('Content-Type', 'text/css');
+        } else if (ext === '.json') {
+            res.setHeader('Content-Type', 'application/json');
+        }
+    }
+}));
+
+// SPA Fallback - For any GET request that hasn't been handled, serve the main HTML file.
+app.get('*', (req, res, next) => {
+    // Skip API routes and static files
+    if (req.path.startsWith('/api/') || 
+        req.path.startsWith('/assets/') || 
+        req.path.startsWith('/audio/') ||
+        req.path.includes('.')) { // Skip files with extensions
+        return next();
+    }
+    
+    // Serve index.html for all other GET requests
+    res.sendFile(path.join(__dirname, 'public', 'index.html'), (err) => {
+        if (err) {
+            console.error('Error sending index.html:', err);
+            if (!res.headersSent) {
+                res.status(500).send('Error loading the application');
+            }
+        }
+    });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Server error:', err);
+    if (!res.headersSent) {
+        res.status(500).json({ 
+            error: 'Internal Server Error', 
+            message: process.env.NODE_ENV === 'production' ? 'Something went wrong' : err.message 
+        });
     }
 });
 
-// 5. Final 404 Handler - Catches any request that didn't match any of the above.
+// 404 Handler - Catches any request that didn't match any of the above
 app.use((req, res) => {
     if (!res.headersSent) {
-      res.status(404).send('Not Found');
+        res.status(404).send('Not Found');
     }
 });
 
 loadSongs().then(() => {
-    app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+    const server = app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+        console.log(`Network URL: http://${os.hostname()}:${PORT}`);
+        console.log('Press Ctrl+C to stop the server');
+    });
+
+    // Handle server errors
+    server.on('error', (error) => {
+        if (error.code === 'EADDRINUSE') {
+            console.error(`Port ${PORT} is already in use. Please stop any other servers using this port.`);
+        } else {
+            console.error('Server error:', error);
+        }
+        process.exit(1);
+    });
+}).catch(error => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
 });

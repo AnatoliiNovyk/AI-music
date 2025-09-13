@@ -17,7 +17,7 @@
     "tempo": 175,
     "keySignature": "Dm",
     "tags": "Neurofunk, Dark Drum and Bass, Explosive",
-    "audioUrl": "/api/proxy-audio?url=https%3A%2F%2Fsamplelib.com%2Flib%2Fpreview%2Fmp3%2Fsample-3s.mp3",
+    "audioUrl": "/audio/sample.wav",
     "coverArtUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=",
     "videoUrl": "https://samplelib.com/lib/preview/mp4/sample-5s.mp4",
     "thumbnailUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="

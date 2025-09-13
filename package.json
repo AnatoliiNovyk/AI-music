@@ -4,9 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev:client": "vite",
+    "build:client": "vite build",
+    "preview": "vite preview",
+    "dev:server": "node server/index.js",
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "build": "npm run build:client",
+    "start": "node server/index.js"
   },
   "dependencies": {
     "@babel/core": "^7.28.4",
@@ -15,6 +19,7 @@
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "fs": "^0.0.1-security",
+    "fs-extra": "^11.3.1",
     "path": "^0.12.7",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
@@ -27,6 +32,8 @@
     "@babel/preset-react": "^7.27.1",
     "@babel/preset-typescript": "^7.27.1",
     "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.2",
+    "concurrently": "^9.2.1",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
